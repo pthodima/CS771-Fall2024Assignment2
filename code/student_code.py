@@ -58,6 +58,30 @@ class CustomConv2DFunction(Function):
 
         #################################################################################
         # Fill in the code here
+        (_, _, h, w) = input_feats.shape
+        output_shape = (int((h + 2*padding - kernel_size + stride)/2), int((w + 2*padding - kernel_size + stride)/2))
+
+        # Unfold the input features into a Matrix to allow matrix multiplication
+        unfolded_feats = nn.functional.unfold(
+            input_feats, kernel_size, padding=padding, stride=stride
+        ) # (N, C_i*(K^2), L)
+
+        # Unfold the kernel
+        unfolded_kernel = torch.flatten(weight, start_dim=1) # (C_o, C_i * k^2)
+
+        # Apply the kernels
+        unfolded_output = torch.matmul(unfolded_kernel, unfolded_feats) # (N, C_o, L)
+
+        # Fold the output back
+        output = torch.nn.functional.fold(
+            unfolded_output, output_shape, 1, padding=0, stride=1
+        )
+
+        output += bias.view(1, bias.size(0), 1, 1)
+
+        ## TODO: Need to check if any other tensors need to be saved
+        ctx.save_for_backward(weight, bias)
+
         #################################################################################
 
         # save for backward (you need to save the unfolded tensor into ctx)
