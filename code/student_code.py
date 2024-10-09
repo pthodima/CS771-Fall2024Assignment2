@@ -80,7 +80,7 @@ class CustomConv2DFunction(Function):
         output += bias.view(1, bias.size(0), 1, 1)
 
         ## TODO: Need to check if any other tensors need to be saved
-        ctx.save_for_backward(weight, bias)
+        ctx.save_for_backward(unfolded_feats, weight, bias)
 
         #################################################################################
 
@@ -105,6 +105,7 @@ class CustomConv2DFunction(Function):
         """
         # unpack tensors and initialize the grads
         # your_vars, weight, bias = ctx.saved_tensors
+        unfolded_feats, weight, bias = ctx.saved_tensors
         grad_input = grad_weight = grad_bias = None
 
         # recover the conv params
@@ -116,6 +117,20 @@ class CustomConv2DFunction(Function):
 
         #################################################################################
         # Fill in the code here
+
+        # Gradient w.r.t weights
+        unfolded_grad_output = torch.nn.functional.unfold(grad_output, 1, padding=0, stride=1)
+        folded_grad_weight = torch.matmul(unfolded_grad_output, unfolded_feats.permute([0, 2, 1]))
+        grad_weight = folded_grad_weight.sum(0)
+        grad_weight = torch.unflatten(grad_weight,1, (grad_weight.size(1)// kernel_size**2, kernel_size, kernel_size))
+
+
+        # Gradient w.r.t input
+        unfolded_weight = torch.flatten(weight, start_dim=1)
+        folded_grad_input = torch.matmul(unfolded_weight.T, unfolded_grad_output)
+        grad_input = torch.nn.functional.fold(folded_grad_input, (input_height, input_width), kernel_size = kernel_size, padding=padding, stride=stride)
+
+        # torch.nn.functional.unfold(input_feats, kernel_size, padding=padding, stride=stride)
         #################################################################################
         # compute the gradients w.r.t. input and params
 
