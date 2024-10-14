@@ -59,7 +59,7 @@ class CustomConv2DFunction(Function):
         #################################################################################
         # Fill in the code here
         (_, _, h, w) = input_feats.shape
-        output_shape = ((h + 2*padding - kernel_size + stride)//2, (w + 2*padding - kernel_size + stride)//2)
+        output_shape = ((h + 2*padding - kernel_size + stride)//stride, (w + 2*padding - kernel_size + stride)//stride)
 
         # Unfold the input features into a Matrix to allow matrix multiplication
         unfolded_feats = nn.functional.unfold(
