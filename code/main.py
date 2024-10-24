@@ -158,6 +158,12 @@ parser.add_argument(
     "--use-resnet18", action="store_true", help="Use pretrained resnet18 model"
 )
 parser.add_argument("--gpu", default=0, type=int, help="GPU ID to use.")
+parser.add_argument(
+    "--use-mps",
+    default=False,
+    action="store_true",
+    help="Use MPS (to use GPU on M1 Mac)",
+)
 
 
 # main function for training and testing
@@ -174,6 +180,11 @@ def main(args):
             "You will NOT be able to switch between CPU and GPU training!",
         )
 
+    # Check that MPS is available if --use-mps set
+    if args.use_mps:
+        assert torch.backends.mps.is_available(), "MPS backend is not available!"
+        print("Using MPS backend")
+
     # fix the random seeds (the best we can)
     fixed_random_seed = 2024
     torch.manual_seed(fixed_random_seed)
@@ -184,6 +195,7 @@ def main(args):
     if args.use_custom_conv:
         print("Using custom convolutions in the network")
         model = default_cnn_model(conv_op=CustomConv2d, num_classes=100)
+        model_arch="CustomCNN"
     elif args.use_resnet18:
         model = torchvision.models.resnet18(pretrained=True)
         model.fc = nn.Linear(512, 100)
@@ -197,8 +209,12 @@ def main(args):
     criterion = nn.CrossEntropyLoss()
     # put everthing to gpu
     if args.gpu >= 0:
-        model = model.cuda(args.gpu)
-        criterion = criterion.cuda(args.gpu)
+        if args.use_mps:
+            model = model.to("mps")
+            criterion = criterion.to("mps")
+        else:
+            model = model.cuda(args.gpu)
+            criterion = criterion.cuda(args.gpu)
 
     # setup the optimizer
     if not args.use_vit:
@@ -271,7 +287,10 @@ def main(args):
             if args.gpu < 0:
                 model = model.cpu()
             else:
-                model = model.cuda(args.gpu)
+                if args.use_mps:
+                    model = model.to("mps")
+                else:
+                    model = model.cuda(args.gpu)
             # only load the optimizer if necessary
             if (not args.evaluate) and (not args.attack):
                 optimizer.load_state_dict(checkpoint["optimizer"])
@@ -405,8 +424,12 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, args, wri
 
         # data -> GPU
         if args.gpu >= 0:
-            input = input.cuda(args.gpu, non_blocking=True)
-            target = target.cuda(args.gpu, non_blocking=True)
+            if args.use_mps:
+                input = input.to("mps", non_blocking=True)
+                target = target.to("mps", non_blocking=True)
+            else:
+                input = input.cuda(args.gpu, non_blocking=True)
+                target = target.cuda(args.gpu, non_blocking=True)
 
         # compute output
         output = model(input)
@@ -431,7 +454,10 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, args, wri
         scheduler.step()
 
         # measure elapsed time
-        torch.cuda.synchronize()
+        if args.use_mps:
+            torch.mps.synchronize()
+        else:
+            torch.cuda.synchronize()
         batch_time.update(time.time() - end)
         end = time.time()
 
@@ -452,16 +478,12 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, args, wri
                     loss=losses,
                     top1=top1,
                     top5=top5,
-                )
+                    )
             )
             # log loss / lr
+            writer.add_scalar("data/training_loss", losses.val, epoch * num_iters + i)
             writer.add_scalar(
-                "data/training_loss", losses.val, epoch * num_iters + i
-            )
-            writer.add_scalar(
-                "data/learning_rate",
-                scheduler.get_last_lr()[0],
-                epoch * num_iters + i
+                "data/learning_rate", scheduler.get_last_lr()[0], epoch * num_iters + i
             )
 
     # print the learning rate
@@ -492,8 +514,12 @@ def validate(val_loader, model, epoch, args, writer, attacker=None, visualizer=N
         # loop over validation set
         for i, (input, target) in enumerate(val_loader):
             if args.gpu >= 0:
-                input = input.cuda(args.gpu, non_blocking=False)
-                target = target.cuda(args.gpu, non_blocking=False)
+                if args.use_mps:
+                    input = input.to("mps", non_blocking=False)
+                    target = target.to("mps", non_blocking=False)
+                else:
+                    input = input.cuda(args.gpu, non_blocking=False)
+                    target = target.cuda(args.gpu, non_blocking=False)
 
             # generate adversarial samples
             if attacker is not None:
@@ -517,7 +543,10 @@ def validate(val_loader, model, epoch, args, writer, attacker=None, visualizer=N
             top5.update(acc5.item(), input.size(0))
 
             # measure elapsed time
-            torch.cuda.synchronize()
+            if args.use_mps:
+                torch.mps.synchronize()
+            else:
+                torch.cuda.synchronize()
             batch_time.update(time.time() - end)
             end = time.time()
 
