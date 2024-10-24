@@ -307,6 +307,11 @@ class Attention(nn.Module):
         q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
         #################################################################################
         # Fill in the code here
+        attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = attn.softmax(dim = -1)
+        x = (attn @ v)
+        x= x.reshape(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        x = self.proj(x)
         #################################################################################
         return x
 
@@ -449,6 +454,21 @@ class SimpleViT(nn.Module):
 
         ########################################################################
         # Fill in the code here
+        self.blocks = nn.ModuleList([
+            TransformerBlock(
+                dim = embed_dim,
+                num_heads = num_heads,
+                mlp_ratio = mlp_ratio,
+                qkv_bias = qkv_bias,
+                drop_path=dpr[i],
+                norm_layer=norm_layer,
+                act_layer=act_layer,
+                window_size=window_size if i in window_block_indexes else 0
+            )
+            for i in range(depth)
+        ])
+        self.norm = norm_layer(embed_dim)
+        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
         ########################################################################
         # The implementation shall define some Transformer blocks
 
@@ -470,6 +490,18 @@ class SimpleViT(nn.Module):
     def forward(self, x):
         ########################################################################
         # Fill in the code here
+        x = self.patch_embed(x)
+        if self.pos_embed is not None:
+            x = x + self.pos_embed
+
+        for blk in self.blocks:
+            x = blk(x)
+
+        x = self.norm(x)
+
+        x = x.mean(dim=(1, 2))
+
+        x = self.head(x)
         ########################################################################
         return x
 
