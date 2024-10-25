@@ -541,6 +541,8 @@ def get_val_transforms():
     return val_transforms
 
 
+import matplotlib.pyplot as plt
+
 #################################################################################
 # Part III: Adversarial samples
 #################################################################################
@@ -578,16 +580,116 @@ class PGDAttack(object):
           output: (torch tensor) an adversarial sample of the given network
         """
         # clone the input tensor and disable the gradients
-        output = input.clone()
-        input.requires_grad = False
 
-        # loop over the number of steps
-        # for _ in range(self.num_steps):
-        #################################################################################
-        # Fill in the code here
-        #################################################################################
+        adv_input = input.clone().detach().requires_grad_(True)
 
-        return output
+        for step in range(self.num_steps):
+            # Ensure adv_input is not None before forward pass
+            if adv_input is None:
+                raise ValueError("adv_input became None during the PGD attack.")
+
+            # Make sure gradients are enabled for adv_input
+            adv_input.requires_grad_(True)
+
+            # Forward pass through the model
+            output = model(adv_input)
+
+            # If no target is provided, use the least confident label (for untargeted attack)
+            least_confident_label = output.min(dim=1)[1]  # Get the index of the least confident class
+            loss = self.loss_fn(output, least_confident_label)
+
+            # Zero all previous gradients in the model
+            model.zero_grad()
+
+            # Backpropagate the loss to get the gradients with respect to the input
+            loss.backward()
+
+            # Check if gradients exist for adv_input
+            if adv_input.grad is None:
+                print("Warning: adv_input.grad is None. Make sure gradients are being calculated correctly.")
+                break
+
+            # Take a step in the direction of the gradient to update the adversarial input
+            with torch.no_grad():
+                adv_input += self.step_size * adv_input.grad.sign()
+
+                # Project the perturbation back to the epsilon-ball in l-infinity norm
+                perturbation = torch.clamp(adv_input - input, min=-self.epsilon, max=self.epsilon)
+                adv_input = torch.clamp(input + perturbation, 0, 1).detach_()
+
+                # Log details for troubleshooting
+                print(f"Step {step+1}/{self.num_steps}")
+                print(f"Perturbation - Min: {perturbation.min().item()}, Max: {perturbation.max().item()}, Mean: {perturbation.mean().item()}")
+                print(f"Adv Input - Min: {adv_input.min().item()}, Max: {adv_input.max().item()}, Mean: {adv_input.mean().item()}")
+
+            # Re-enable gradient tracking for the next iteration
+            adv_input.requires_grad_(True)
+
+            if step == self.num_steps - 1:  # You can also put a different step number here
+                print(f"Visualizing after step {step + 1}")
+                self.visualize_images(input[0], adv_input[0])
+
+        return adv_input
+        
+    def visualize_images(self, original, adversarial):
+        """
+        Visualize original, adversarial, and perturbation.
+        Args:
+            original (torch.Tensor): Original image tensor.
+            adversarial (torch.Tensor): Adversarial image tensor.
+        """
+    # Define ImageNet mean and std for denormalization
+        mean = [0.485, 0.456, 0.406]
+        std = [0.229, 0.224, 0.225]
+
+    # Denormalize the images
+        original = self.denormalize(original.cpu(), mean, std).clamp(0, 1)
+        adversarial = self.denormalize(adversarial.cpu(), mean, std).clamp(0, 1)
+
+    # Convert tensors to NumPy arrays
+        original_img = original.permute(1, 2, 0).detach().numpy()
+        adversarial_img = adversarial.permute(1, 2, 0).detach().numpy()
+    
+    # Calculate perturbation
+        perturbation = adversarial_img - original_img
+
+    # Create subplots
+        fig, axs = plt.subplots(1, 3, figsize=(12, 4))
+
+    # Plot original image
+        axs[0].imshow(original_img)
+        axs[0].set_title("Original Image")
+
+    # Plot adversarial image
+        axs[1].imshow(adversarial_img)
+        axs[1].set_title("Adversarial Image")
+
+    # Plot perturbation
+        axs[2].imshow(perturbation)
+        axs[2].set_title("Perturbation")
+
+    # Hide axis for all subplots
+        for ax in axs:
+            ax.axis('off')
+
+    # Show the plots
+        plt.show()
+
+    def denormalize(self, tensor, mean, std):
+        """
+        Denormalizes a tensor image with the given mean and std.
+        Args:
+            tensor (torch.Tensor): Image tensor of shape (C, H, W).
+            mean (list): Mean values used for normalization.
+            std (list): Std values used for normalization.
+        Returns:
+            torch.Tensor: Denormalized image.
+        """
+        mean = torch.tensor(mean).view(-1, 1, 1)
+        std = torch.tensor(std).view(-1, 1, 1)
+        tensor = tensor * std + mean
+        return tensor
+
 
 default_attack = PGDAttack
 
