@@ -292,8 +292,79 @@ class SimpleNet(nn.Module):
         return x
 
 
-# change this to your model!
-default_cnn_model = SimpleNet
+#################################################################################
+# Part I.2: Design and train a convolutional network
+#################################################################################
+class CustomConvNet(nn.Module):
+    # a simple CNN for image classifcation
+    def __init__(self, conv_op=nn.Conv2d, num_classes=100):
+        super(CustomConvNet, self).__init__()
+        self.features = nn.Sequential(
+            # conv1 block
+            conv_op(3, 64, kernel_size=7, stride=2, padding=3),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(64),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            # conv2 block
+            conv_op(64, 64, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            conv_op(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            conv_op(64, 128, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(128),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            # conv3 block
+            conv_op(128, 256, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            conv_op(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            conv_op(256, 256, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(256),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),
+            # conv4 block
+            conv_op(256, 128, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            conv_op(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(inplace=True),
+            conv_op(128, 256, kernel_size=1, stride=1, padding=0),
+            nn.ReLU(inplace=True),
+            nn.BatchNorm2d(256),
+        )
+        # global avg pooling + FC
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512, num_classes)
+
+        self.attack = PGDAttack(nn.CrossEntropyLoss(), num_steps=10)
+
+    def reset_parameters(self):
+        # init all params
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.consintat_(m.bias, 0.0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, x):
+        # you can implement adversarial training here
+        # if self.training:
+        #   # generate adversarial sample based on x
+        # original_mode = self.training
+        # if original_mode and np.random.rand() < 0.3: # with 30 % chance
+        #     self.eval() # Temporarily disable training for adv attack
+        #     x = self.attack.perturb(self, x)
+        #     self.train(original_mode)
+        x = self.features(x)
+        x = self.avgpool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
+default_cnn_model = CustomConvNet
 
 
 #################################################################################
