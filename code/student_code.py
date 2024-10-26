@@ -280,10 +280,11 @@ class SimpleNet(nn.Module):
         # you can implement adversarial training here
         # if self.training:
         #   # generate adversarial sample based on x
-        if np.random.rand() < 0.3: # with 30 % chance
-            self.train(False)
+        original_mode = self.training
+        if original_mode and np.random.rand() < 0.3: # with 30 % chance
+            self.eval() # Temporarily disable training for adv attack
             x = self.attack.perturb(self, x)
-            self.train()
+            self.train(original_mode)
         x = self.features(x)
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
