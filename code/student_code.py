@@ -633,8 +633,12 @@ class PGDAttack(object):
             model.zero_grad() # clear accumulated gradients
             loss.backward()
 
+            # Check if grads are being computed
+            if x_adv.grad is None:
+                raise RuntimeError("Gradient for x_adv is None. x_adv.requires_grad is set to True")
+
             # Perturb in the direction of the gradient sign
-            grad_sign = torch.sign(x_adv.grad.data)
+            grad_sign = torch.sign(x_adv.grad)
             x_adv = x_adv + self.step_size * grad_sign
 
             # Clip to stay within epison-hypershere around the original image
