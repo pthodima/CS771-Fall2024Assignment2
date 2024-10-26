@@ -280,7 +280,7 @@ class SimpleNet(nn.Module):
         # you can implement adversarial training here
         # if self.training:
         #   # generate adversarial sample based on x
-        if np.random.rand() < 0.2:
+        if np.random.rand() < 0.3: # with 30 % chance
             self.train(False)
             x = self.attack.perturb(self, x)
             self.train()
@@ -634,12 +634,12 @@ class PGDAttack(object):
             loss.backward()
 
             # Perturb in the direction of the gradient sign
-            grad_sign = x_adv.grad.sign()
+            grad_sign = torch.sign(x_adv.grad.data)
             x_adv = x_adv + self.step_size * grad_sign
 
             # Clip to stay within epison-hypershere around the original image
             x_adv = torch.clamp(x_adv, input - self.epsilon, input + self.epsilon).detach()
-            x_adv.requires_grad = True # Re-enable for next iteration
+            x_adv.grad.zero_() # clear
         #################################################################################
 
         return x_adv
