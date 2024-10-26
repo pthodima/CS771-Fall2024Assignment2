@@ -1,17 +1,23 @@
+import math
+
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Function
-from torch.nn.modules.module import Module
 from torch.nn.functional import fold, unfold
+from torch.nn.modules.module import Module
 from torchvision.utils import make_grid
-import math
 
-from utils import resize_image
 import custom_transforms as transforms
-from custom_blocks import (PatchEmbed, window_partition, window_unpartition,
-                           DropPath, MLP, trunc_normal_)
-
+from custom_blocks import (
+    MLP,
+    DropPath,
+    PatchEmbed,
+    trunc_normal_,
+    window_partition,
+    window_unpartition,
+)
+from utils import resize_image
 
 #################################################################################
 # You will need to fill in the missing code in this file
@@ -59,18 +65,21 @@ class CustomConv2DFunction(Function):
         #################################################################################
         # Fill in the code here
         (_, _, h, w) = input_feats.shape
-        output_shape = ((h + 2*padding - kernel_size + stride)//stride, (w + 2*padding - kernel_size + stride)//stride)
+        output_shape = (
+            (h + 2 * padding - kernel_size + stride) // stride,
+            (w + 2 * padding - kernel_size + stride) // stride,
+        )
 
         # Unfold the input features into a Matrix to allow matrix multiplication
         unfolded_feats = nn.functional.unfold(
             input_feats, kernel_size, padding=padding, stride=stride
-        ) # (N, C_i*(K^2), L)
+        )  # (N, C_i*(K^2), L)
 
         # Unfold the kernel
-        unfolded_kernel = torch.flatten(weight, start_dim=1) # (C_o, C_i * k^2)
+        unfolded_kernel = torch.flatten(weight, start_dim=1)  # (C_o, C_i * k^2)
 
         # Apply the kernels
-        unfolded_output = torch.matmul(unfolded_kernel, unfolded_feats) # (N, C_o, L)
+        unfolded_output = torch.matmul(unfolded_kernel, unfolded_feats)  # (N, C_o, L)
 
         # Fold the output back
         output = torch.nn.functional.fold(
@@ -119,16 +128,29 @@ class CustomConv2DFunction(Function):
         # Fill in the code here
 
         # Gradient w.r.t weights
-        unfolded_grad_output = torch.nn.functional.unfold(grad_output, 1, padding=0, stride=1)
-        folded_grad_weight = torch.matmul(unfolded_grad_output, unfolded_feats.permute([0, 2, 1]))
+        unfolded_grad_output = torch.nn.functional.unfold(
+            grad_output, 1, padding=0, stride=1
+        )
+        folded_grad_weight = torch.matmul(
+            unfolded_grad_output, unfolded_feats.permute([0, 2, 1])
+        )
         grad_weight = folded_grad_weight.sum(0)
-        grad_weight = torch.unflatten(grad_weight,1, (grad_weight.size(1)// kernel_size**2, kernel_size, kernel_size))
-
+        grad_weight = torch.unflatten(
+            grad_weight,
+            1,
+            (grad_weight.size(1) // kernel_size**2, kernel_size, kernel_size),
+        )
 
         # Gradient w.r.t input
         unfolded_weight = torch.flatten(weight, start_dim=1)
         folded_grad_input = torch.matmul(unfolded_weight.T, unfolded_grad_output)
-        grad_input = torch.nn.functional.fold(folded_grad_input, (input_height, input_width), kernel_size = kernel_size, padding=padding, stride=stride)
+        grad_input = torch.nn.functional.fold(
+            folded_grad_input,
+            (input_height, input_width),
+            kernel_size=kernel_size,
+            padding=padding,
+            stride=stride,
+        )
 
         # torch.nn.functional.unfold(input_feats, kernel_size, padding=padding, stride=stride)
         #################################################################################
@@ -241,6 +263,8 @@ class SimpleNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512, num_classes)
 
+        self.attack = PGDAttack(nn.CrossEntropyLoss(), num_steps=10)
+
     def reset_parameters(self):
         # init all params
         for m in self.modules():
@@ -256,14 +280,20 @@ class SimpleNet(nn.Module):
         # you can implement adversarial training here
         # if self.training:
         #   # generate adversarial sample based on x
+        if np.random.rand() < 0.2:
+            self.train(False)
+            x = self.attack.perturb(self, x)
+            self.train()
         x = self.features(x)
         x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
 
+
 # change this to your model!
 default_cnn_model = SimpleNet
+
 
 #################################################################################
 # Part II.1: Understanding self-attention
@@ -299,24 +329,28 @@ class Attention(nn.Module):
         B, H, W, _ = x.shape
         # qkv with shape (3, B, nHead, H * W, C)
         qkv = (
-            self.qkv(x).reshape(
-                B, H * W, 3, self.num_heads, -1
-            ).permute(2, 0, 3, 1, 4)
+            self.qkv(x).reshape(B, H * W, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
         )
         # q, k, v with shape (B * nHead, H * W, C)
         q, k, v = qkv.reshape(3, B * self.num_heads, H * W, -1).unbind(0)
         #################################################################################
         # Fill in the code here
         attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim = -1)
-        x = (attn @ v)
-        x= x.reshape(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        attn = attn.softmax(dim=-1)
+        x = attn @ v
+        x = (
+            x.reshape(B, self.num_heads, H, W, -1)
+            .permute(0, 2, 3, 1, 4)
+            .reshape(B, H, W, -1)
+        )
         x = self.proj(x)
         #################################################################################
         return x
 
+
 class TransformerBlock(nn.Module):
     """Transformer blocks with support of local window self-attention"""
+
     def __init__(
         self,
         dim,
@@ -351,9 +385,7 @@ class TransformerBlock(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2 = norm_layer(dim)
         self.mlp = MLP(
-            in_features=dim,
-            hidden_features=int(dim * mlp_ratio),
-            act_layer=act_layer
+            in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer
         )
 
         self.window_size = window_size
@@ -454,21 +486,25 @@ class SimpleViT(nn.Module):
 
         ########################################################################
         # Fill in the code here
-        self.blocks = nn.ModuleList([
-            TransformerBlock(
-                dim = embed_dim,
-                num_heads = num_heads,
-                mlp_ratio = mlp_ratio,
-                qkv_bias = qkv_bias,
-                drop_path=dpr[i],
-                norm_layer=norm_layer,
-                act_layer=act_layer,
-                window_size=window_size if i in window_block_indexes else 0
-            )
-            for i in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                TransformerBlock(
+                    dim=embed_dim,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    drop_path=dpr[i],
+                    norm_layer=norm_layer,
+                    act_layer=act_layer,
+                    window_size=window_size if i in window_block_indexes else 0,
+                )
+                for i in range(depth)
+            ]
+        )
         self.norm = norm_layer(embed_dim)
-        self.head = nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        self.head = (
+            nn.Linear(embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        )
         ########################################################################
         # The implementation shall define some Transformer blocks
 
@@ -505,8 +541,10 @@ class SimpleViT(nn.Module):
         ########################################################################
         return x
 
+
 # change this to your model!
 default_vit_model = SimpleViT
+
 
 # define data augmentation used for training, you can tweak things if you want
 def get_train_transforms():
@@ -518,11 +556,12 @@ def get_train_transforms():
     train_transforms.append(transforms.RandomSizedCrop(128))
     train_transforms.append(transforms.ToTensor())
     # mean / std from imagenet
-    train_transforms.append(transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    ))
+    train_transforms.append(
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    )
     train_transforms = transforms.Compose(train_transforms)
     return train_transforms
+
 
 # define data augmentation used for validation, you can tweak things if you want
 def get_val_transforms():
@@ -531,9 +570,9 @@ def get_val_transforms():
     val_transforms.append(transforms.CenterCrop(128))
     val_transforms.append(transforms.ToTensor())
     # mean / std from imagenet
-    val_transforms.append(transforms.Normalize(
-        mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-    ))
+    val_transforms.append(
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    )
     val_transforms = transforms.Compose(val_transforms)
     return val_transforms
 
@@ -575,16 +614,35 @@ class PGDAttack(object):
           output: (torch tensor) an adversarial sample of the given network
         """
         # clone the input tensor and disable the gradients
-        output = input.clone()
+        x_adv = input.clone()
         input.requires_grad = False
+        x_adv.requires_grad = True
 
         # loop over the number of steps
-        # for _ in range(self.num_steps):
-        #################################################################################
-        # Fill in the code here
+        for _ in range(self.num_steps):
+            #################################################################################
+            # Fill in the code here
+
+            # Compute output of the model
+            y_adv = model(x_adv)
+            # Find the least probable class according to the model
+            _, least_prob_index = torch.min(y_adv, 1)  # min for each image
+            loss = self.loss_fn(y_adv, least_prob_index)
+
+            # Compute grad w.r.t input
+            model.zero_grad() # clear accumulated gradients
+            loss.backward()
+
+            # Perturb in the direction of the gradient sign
+            grad_sign = x_adv.grad.sign()
+            x_adv = x_adv + self.step_size * grad_sign
+
+            # Clip to stay within epison-hypershere around the original image
+            x_adv = torch.clamp(x_adv, input - self.epsilon, input + self.epsilon).detach()
+            x_adv.requires_grad = True # Re-enable for next iteration
         #################################################################################
 
-        return output
+        return x_adv
 
 default_attack = PGDAttack
 
