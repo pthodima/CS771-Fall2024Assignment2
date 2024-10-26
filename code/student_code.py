@@ -614,7 +614,7 @@ class PGDAttack(object):
           output: (torch tensor) an adversarial sample of the given network
         """
         # clone the input tensor and disable the gradients
-        x_adv = input.clone()
+        x_adv = input.clone().detach()
         input.requires_grad = False
         x_adv.requires_grad = True
 
@@ -639,7 +639,10 @@ class PGDAttack(object):
 
             # Clip to stay within epison-hypershere around the original image
             x_adv = torch.clamp(x_adv, input - self.epsilon, input + self.epsilon).detach()
-            x_adv.grad.zero_() # clear
+
+            #Re enable requires_grad for next iter
+            x_adv = x_adv.detach()
+            x_adv.requires_grad = True
         #################################################################################
 
         return x_adv
