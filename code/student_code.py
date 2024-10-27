@@ -334,7 +334,7 @@ class CustomConvNet(nn.Module):
         )
         # global avg pooling + FC
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc = nn.Linear(512, num_classes)
+        self.fc = nn.Linear(256, num_classes)
 
         self.attack = PGDAttack(nn.CrossEntropyLoss(), num_steps=10)
 
